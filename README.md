@@ -11,16 +11,6 @@
 6 index.html muestra resultado y lista historial
 ```
 
----
-
-## Requisitos previos
-
-- Cuenta AWS con acceso a: Lambda, API Gateway, S3, Rekognition, Lightsail
-- Python 3.10+
-- Git
-
----
-
 ## Parte 1: Backend Django
 
 ### Estructura del proyecto
@@ -72,7 +62,6 @@ python manage.py runserver
 
 ## Parte 2: Función Lambda
 
-### Descripción
 
 La función Lambda recibe una imagen en base64 desde el HTML, la guarda en S3, la analiza con Amazon Rekognition y guarda el resultado en Django.
 
