@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Clasificador de Imágenes</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <style>
+    body { background: #f0f2f5; }
+    .card { border-radius: 16px; }
+    #preview { max-height: 260px; object-fit: contain; }
+    .badge-tipo { font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+<div class="container py-5" style="max-width:780px">
+  <h2 class="mb-1 fw-bold">🖼️ Clasificador de Imágenes</h2>
+  <p class="text-muted mb-4">Sube una imagen y la IA detectará automáticamente su tipo.</p>
+
+  <div class="card shadow-sm p-4 mb-4">
+    <label class="form-label fw-semibold">Selecciona una imagen</label>
+    <input type="file" id="inputImagen" class="form-control mb-3" accept="image/*"/>
+    <img id="preview" class="img-fluid rounded mb-3 d-none" alt="Vista previa"/>
+    <button id="btnAnalizar" class="btn btn-primary w-100" disabled>
+      Analizar imagen
+    </button>
+  </div>
+
+  <div id="resultado" class="card shadow-sm p-4 d-none mb-4">
+    <h5 class="fw-bold mb-3"> Resultado</h5>
+    <div class="mb-2">
+      <span class="text-muted">Tipo detectado:</span>
+      <span id="resTipo" class="badge bg-success badge-tipo ms-2"></span>
+    </div>
+    <div class="mb-2">
+      <span class="text-muted">Descripción:</span>
+      <p id="resDescripcion" class="mb-0 mt-1"></p>
+    </div>
+    <div class="mb-2">
+      <span class="text-muted">Guardado en S3 como:</span>
+      <code id="resS3Key" class="ms-1"></code>
+    </div>
+    <div class="mb-0">
+      <span class="text-muted">ID en base de datos:</span>
+      <strong id="resId" class="ms-1"></strong>
+    </div>
+  </div>
+
+  <div id="errorDiv" class="alert alert-danger d-none mt-3"></div>
+
+  <div id="spinner" class="text-center d-none mt-3">
+    <div class="spinner-border text-primary"></div>
+    <p class="mt-2 text-muted">Analizando con IA...</p>
+  </div>
+
+  <!-- Historial -->
+  <div class="card shadow-sm p-4 mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="fw-bold mb-0"> Imágenes escaneadas</h5>
+      <button id="btnRefresh" class="btn btn-sm btn-outline-secondary"> Actualizar</button>
+    </div>
+    <div id="tablaSpinner" class="text-center py-3">
+      <div class="spinner-border spinner-border-sm text-secondary"></div>
+      <span class="ms-2 text-muted">Cargando...</span>
+    </div>
+    <div class="table-responsive d-none" id="tablaContainer">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>#</th>
+            <th>Nombre</th>
+            <th>Tipo detectado</th>
+            <th>Descripción</th>
+            <th>Fecha</th>
+          </tr>
+        </thead>
+        <tbody id="tablaBody"></tbody>
+      </table>
+    </div>
+    <p id="tablaVacia" class="text-muted text-center d-none">No hay imágenes registradas aún.</p>
+  </div>
+</div>
+
+<script>
+  const LAMBDA_URL = "http://41woijtqo9.execute-api.us-east-1.amazonaws.com/default/reconocimiento";
+  const DJANGO_URL = "https://hsmbxk7k-8000.use2.devtunnels.ms/api/imagenes/";
+
+  const inputImagen = document.getElementById('inputImagen');
+  const btnAnalizar = document.getElementById('btnAnalizar');
+  const preview     = document.getElementById('preview');
+
+  let archivoSeleccionado = null;
+
+  // ── Cargar historial ──────────────────────────────────────────
+  async function cargarHistorial() {
+    document.getElementById('tablaSpinner').classList.remove('d-none');
+    document.getElementById('tablaContainer').classList.add('d-none');
+    document.getElementById('tablaVacia').classList.add('d-none');
+
+    try {
+      const res  = await fetch(DJANGO_URL);
+      const data = await res.json();
+      const body = document.getElementById('tablaBody');
+      body.innerHTML = '';
+
+      if (!data.length) {
+        document.getElementById('tablaVacia').classList.remove('d-none');
+      } else {
+        data.forEach(img => {
+          const fecha = img.creado_en
+            ? new Date(img.creado_en).toLocaleString('es-EC')
+            : '—';
+          body.innerHTML += `
+            <tr>
+              <td>${img.id}</td>
+              <td><code>${img.nombre}</code></td>
+              <td><span class="badge bg-success">${img.tipo_detectado}</span></td>
+              <td class="text-muted small">${img.descripcion}</td>
+              <td class="text-muted small">${fecha}</td>
+            </tr>`;
+        });
+        document.getElementById('tablaContainer').classList.remove('d-none');
+      }
+    } catch (err) {
+      document.getElementById('tablaVacia').textContent = 'Error al cargar el historial.';
+      document.getElementById('tablaVacia').classList.remove('d-none');
+    } finally {
+      document.getElementById('tablaSpinner').classList.add('d-none');
+    }
+  }
+
+  document.getElementById('btnRefresh').addEventListener('click', cargarHistorial);
+
+  // ── Preview al seleccionar ────────────────────────────────────
+  inputImagen.addEventListener('change', () => {
+    const file = inputImagen.files[0];
+    if (!file) return;
+    archivoSeleccionado = file;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      preview.src = e.target.result;
+      preview.classList.remove('d-none');
+      btnAnalizar.disabled = false;
+      document.getElementById('resultado').classList.add('d-none');
+      document.getElementById('errorDiv').classList.add('d-none');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // ── Analizar ──────────────────────────────────────────────────
+  btnAnalizar.addEventListener('click', async () => {
+    if (!archivoSeleccionado) return;
+
+    btnAnalizar.disabled = true;
+    document.getElementById('spinner').classList.remove('d-none');
+    document.getElementById('resultado').classList.add('d-none');
+    document.getElementById('errorDiv').classList.add('d-none');
+
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = (e) => resolve(e.target.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(archivoSeleccionado);
+      });
+
+      const res = await fetch(LAMBDA_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          imagen_base64:  base64,
+          nombre_archivo: archivoSeleccionado.name,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      document.getElementById('resTipo').textContent        = data.tipo_detectado;
+      document.getElementById('resDescripcion').textContent = data.descripcion;
+      document.getElementById('resS3Key').textContent       = data.s3_key;
+      document.getElementById('resId').textContent          = data.guardado_id ?? '—';
+      document.getElementById('resultado').classList.remove('d-none');
+
+      // Refrescar tabla automáticamente
+      cargarHistorial();
+
+    } catch (err) {
+      document.getElementById('errorDiv').textContent = 'Error: ' + err.message;
+      document.getElementById('errorDiv').classList.remove('d-none');
+    } finally {
+      document.getElementById('spinner').classList.add('d-none');
+      btnAnalizar.disabled = false;
+    }
+  });
+
+  // Cargar historial al abrir la página
+  cargarHistorial();
+</script>
+</body>
+</html>
